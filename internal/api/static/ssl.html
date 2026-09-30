@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Charstle 证书安装</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #fff; --text: #1b1f27; --muted: #7b8494; --border: #e3e6eb;
+    --accent: #3d6fff; --accent-soft: #e8efff; --code: #eef0f3; --warn: #c27c0e; --warn-soft: #fdf2dc;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1014; --panel: #15181e; --text: #e5e8ee; --muted: #838c9b; --border: #252a33;
+      --accent: #5b87ff; --accent-soft: #1d2a4a; --code: #1b1f27; --warn: #e0a431; --warn-soft: #33280f;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 40px; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  main { max-width: 520px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  header svg { flex: none; }
+  h1 { margin: 0; font-size: 20px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 46px;
+    margin-bottom: 10px; border-radius: 10px; background: var(--accent); color: #fff;
+    font-weight: 600; text-decoration: none;
+  }
+  .btn.secondary { background: var(--accent-soft); color: var(--accent); }
+  .btn:last-child { margin-bottom: 0; }
+  h2 { margin: 0 0 10px; font-size: 15px; }
+  details { border-top: 1px solid var(--border); padding: 12px 0 0; margin-top: 12px; }
+  details:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
+  summary { font-weight: 600; cursor: pointer; }
+  ol { margin: 8px 0 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  b { font-weight: 600; }
+  code { padding: 1px 5px; border-radius: 4px; background: var(--code); font: 12.5px ui-monospace, Menlo, Consolas, monospace; }
+  .warn { background: var(--warn-soft); border-color: transparent; font-size: 13px; }
+  .warn b { color: var(--warn); }
+  .fp { font: 11px/1.6 ui-monospace, Menlo, Consolas, monospace; color: var(--muted); word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg width="40" height="40" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3d6fff"/><path d="M9 11h14M9 16h9M9 21h14" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><circle cx="22.5" cy="16" r="2.5" fill="#fff"/></svg>
+    <div>
+      <h1>安装 Charstle 根证书</h1>
+      <p>用于解密此设备经代理发出的 HTTPS 流量</p>
+    </div>
+  </header>
+
+  <div class="card">
+    <a class="btn" href="/charstle.mobileconfig">iOS / iPadOS 描述文件</a>
+    <a class="btn secondary" href="/charstle-ca.crt">下载证书（.crt）</a>
+    <a class="btn secondary" href="/charstle-ca.pem">下载证书（.pem）</a>
+  </div>
+
+  <div class="card">
+    <h2>安装步骤</h2>
+    <details open>
+      <summary>iOS / iPadOS</summary>
+      <ol>
+        <li>使用 <b>Safari</b> 点击上方「描述文件」并允许下载</li>
+        <li><b>设置 → 通用 → VPN 与设备管理</b>，安装 Charstle Root CA</li>
+        <li><b>设置 → 通用 → 关于本机 → 证书信任设置</b>，打开完全信任</li>
+      </ol>
+    </details>
+    <details>
+      <summary>Android</summary>
+      <ol>
+        <li>下载 <code>.crt</code></li>
+        <li><b>设置 → 安全 → 加密与凭据 → 安装证书 → CA 证书</b></li>
+        <li>Android 7+ 的 App 默认不信任用户证书，需要 App 在 <code>network_security_config</code> 中声明</li>
+      </ol>
+    </details>
+    <details>
+      <summary>Windows / macOS</summary>
+      <ol>
+        <li>Windows：双击 <code>.crt</code> → 安装到「受信任的根证书颁发机构」</li>
+        <li>macOS：双击 <code>.pem</code> 导入钥匙串，并设为「始终信任」</li>
+      </ol>
+    </details>
+  </div>
+
+  <div class="card warn">
+    <b>安全提示：</b>只在你自己的设备上安装。调试结束后可在系统设置中删除或关闭信任。
+    <div class="fp">SHA-256 {{.Fingerprint}}</div>
+  </div>
+</main>
+</body>
+</html>
