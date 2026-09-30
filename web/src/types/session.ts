@@ -1,8 +1,10 @@
 /** 会话（一次 HTTP 事务 / 一个隧道 / 一条 WebSocket 连接） */
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD' | 'CONNECT';
+export type HttpMethod =
+  "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "CONNECT";
 
-export type ResourceType = 'xhr' | 'doc' | 'js' | 'css' | 'img' | 'media' | 'font' | 'ws' | 'other';
+export type ResourceType =
+  "xhr" | "doc" | "js" | "css" | "img" | "media" | "font" | "ws" | "other";
 
 /**
  * pending   等待响应
@@ -12,16 +14,17 @@ export type ResourceType = 'xhr' | 'doc' | 'js' | 'css' | 'img' | 'media' | 'fon
  * paused    命中断点，等待用户操作
  * aborted   在断点处被中止
  */
-export type SessionState = 'pending' | 'done' | 'error' | 'tunnel' | 'paused' | 'aborted';
+export type SessionState =
+  "pending" | "done" | "error" | "tunnel" | "paused" | "aborted";
 
-export type Protocol = 'HTTP/1.1' | 'HTTP/2' | 'WebSocket' | 'TCP';
+export type Protocol = "HTTP/1.1" | "HTTP/2" | "WebSocket" | "TCP";
 
 /** 列表里展示用的摘要（通过事件流批量推送） */
 export interface SessionSummary {
   id: number;
   clientIp: string;
   method: HttpMethod;
-  scheme: 'http' | 'https' | 'ws' | 'wss';
+  scheme: "http" | "https" | "ws" | "wss";
   host: string;
   path: string;
   proto: Protocol;
@@ -50,7 +53,8 @@ export interface Header {
   enabled?: boolean;
 }
 
-export type BodyKind = 'json' | 'text' | 'html' | 'xml' | 'form' | 'image' | 'binary' | 'none';
+export type BodyKind =
+  "json" | "text" | "html" | "xml" | "form" | "image" | "binary" | "none";
 
 export interface BodyInfo {
   kind: BodyKind;
@@ -59,7 +63,7 @@ export interface BodyInfo {
   size: number;
   /** 解码后字节数 */
   decodedSize?: number;
-  encoding?: 'gzip' | 'br' | 'zstd' | 'deflate';
+  encoding?: "gzip" | "br" | "zstd" | "deflate";
   /** 超过捕获上限被截断 */
   truncated?: boolean;
   text?: string;
@@ -95,16 +99,18 @@ export interface RuleHit {
   pattern: string;
   action: string;
   value: string;
-  phase: 'request' | 'dial' | 'response';
+  phase: "request" | "dial" | "response";
 }
 
 export interface WsFrame {
   id: number;
-  dir: 'out' | 'in';
-  opcode: 'text' | 'binary' | 'ping' | 'pong' | 'close';
+  dir: "out" | "in";
+  opcode: "text" | "binary" | "continuation" | "ping" | "pong" | "close";
   size: number;
   time: number;
   data: string;
+  encoding?: "utf8" | "base64";
+  truncated?: boolean;
 }
 
 export interface SessionDetail extends SessionSummary {

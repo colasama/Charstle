@@ -1,114 +1,95 @@
-import { useState } from 'react';
-import { Gauge, Info } from 'lucide-react';
-import { PageHeader, Switch, Segmented } from '../components/common/Controls';
-import { useUI } from '../store/ui';
-import { throttleProfiles } from '../mock/data';
-import { cx } from '../utils/format';
-
-function fmtKbps(k: number) {
-  return k >= 1000 ? `${(k / 1000).toFixed(k % 1000 ? 1 : 0)} Mbps` : `${k} kbps`;
-}
-
-function Slider({ label, value, max, unit }: { label: string; value: number; max: number; unit: string }) {
-  return (
-    <div className="slider-row">
-      <span className="field-label">{label}</span>
-      <input type="range" min={0} max={max} defaultValue={value} />
-      <span className="input-unit">
-        <input className="input input-sm mono" defaultValue={value} />
-        <span>{unit}</span>
-      </span>
-    </div>
-  );
-}
-
+import { useState } from "react";
+import { PageHeader, Switch, FieldRow } from "../components/common/Controls";
+import { StringList } from "../components/common/StringList";
+import { AsyncButton } from "../components/common/AsyncButton";
+import { useData } from "../store/data";
+import { api, type ThrottleConfig } from "../api/client";
+import { throttleProfiles } from "../data/reference";
 export function ThrottlePage() {
-  const { throttling, toggle } = useUI();
-  const [profileId, setProfileId] = useState('3g');
-  const [scope, setScope] = useState<'all' | 'hosts'>('all');
-  // TODO(api): /api/throttle
-  const profile = throttleProfiles.find((p) => p.id === profileId)!;
-
+  const initial = useData((s) => s.throttle);
+  return <Editor key={JSON.stringify(initial)} initial={initial} />;
+}
+function Editor({ initial }: { initial: ThrottleConfig }) {
+  const [c, setC] = useState(initial);
   return (
     <div className="page">
       <PageHeader
-        icon={<Gauge size={18} />}
         title="网络限速"
-        desc="模拟弱网环境：限制带宽、增加延迟和丢包。规则里的 throttle:// 会对单个域名覆盖这里的设置。"
+        desc="限制每个请求的上传和下载速率，并模拟延迟及请求失败；0 表示不限制带宽。"
         actions={
-          <>
-            <span className="muted text-sm">{throttling ? '限速中' : '未启用'}</span>
-            <Switch on={throttling} onChange={() => toggle('throttling')} />
-          </>
+          <AsyncButton
+            className="btn btn-primary"
+            run={() => api.saveThrottle(c)}
+            message="限速配置已保存"
+          >
+            保存
+          </AsyncButton>
         }
       />
       <div className="page-content">
         <section className="card">
-          <div className="card-header">
-            <span className="card-title">预设</span>
-          </div>
           <div className="card-body">
+            <FieldRow label="启用限速">
+              <Switch
+                on={c.enabled}
+                onChange={(enabled) => setC({ ...c, enabled })}
+              />
+            </FieldRow>
             <div className="profile-grid">
               {throttleProfiles.map((p) => (
-                <button key={p.id} className={cx('profile-card', p.id === profileId && 'is-active')} onClick={() => setProfileId(p.id)}>
-                  <span className="profile-name">{p.name}</span>
-                  <span className="profile-stats">
-                    <span>下行</span>
-                    <b>{fmtKbps(p.down)}</b>
-                    <span>上行</span>
-                    <b>{fmtKbps(p.up)}</b>
-                    <span>延迟</span>
-                    <b>{p.latency} ms</b>
-                    <span>丢包</span>
-                    <b>{p.loss}%</b>
+                <button
+                  key={p.id}
+                  className={
+                    "profile-card " + (c.profile.id === p.id ? "is-active" : "")
+                  }
+                  onClick={() => setC({ ...c, profile: p })}
+                >
+                  <b>{p.name}</b>
+                  <span>
+                    {p.down} / {p.up} kbps · {p.latency} ms
                   </span>
                 </button>
               ))}
             </div>
+            {(
+              [
+                ["down", "下行 kbps"],
+                ["up", "上行 kbps"],
+                ["latency", "延迟 ms"],
+                ["loss", "请求失败概率 %"],
+              ] as const
+            ).map(([key, label]) => (
+              <FieldRow key={key} label={label}>
+                <input
+                  className="input"
+                  type="number"
+                  aria-label={label}
+                  min={0}
+                  max={key === "loss" ? 100 : undefined}
+                  value={c.profile[key]}
+                  onChange={(e) =>
+                    setC({
+                      ...c,
+                      profile: {
+                        ...c.profile,
+                        id: "custom",
+                        name: "自定义",
+                        [key]: +e.target.value,
+                      },
+                    })
+                  }
+                />
+              </FieldRow>
+            ))}
+            <FieldRow label="指定域名" hint="留空表示全部请求">
+              <StringList
+                items={c.hosts}
+                onChange={(hosts) => setC({ ...c, hosts })}
+                placeholder="*.example.com"
+              />
+            </FieldRow>
           </div>
         </section>
-
-        <div className="grid-2">
-          <section className="card">
-            <div className="card-header">
-              <span className="card-title">参数</span>
-              <span className="card-subtitle">{profile.builtin ? '修改预设参数会另存为「自定义」' : '自定义'}</span>
-            </div>
-            <div className="card-body" key={profile.id}>
-              <Slider label="下行带宽" value={profile.down} max={10000} unit="kbps" />
-              <Slider label="上行带宽" value={profile.up} max={10000} unit="kbps" />
-              <Slider label="额外延迟" value={profile.latency} max={3000} unit="ms" />
-              <Slider label="丢包率" value={profile.loss} max={50} unit="%" />
-            </div>
-          </section>
-
-          <section className="card">
-            <div className="card-header">
-              <span className="card-title">作用范围</span>
-            </div>
-            <div className="card-body col" style={{ gap: 12 }}>
-              <Segmented
-                value={scope}
-                onChange={setScope}
-                options={[
-                  { value: 'all', label: '全部请求' },
-                  { value: 'hosts', label: '仅指定域名' },
-                ]}
-              />
-              <textarea
-                className="textarea mono"
-                rows={6}
-                disabled={scope === 'all'}
-                placeholder={'每行一个 pattern，例如：\n*.example.com\ncdn.example.net'}
-                defaultValue={'cdn.example.com\n*.example.net'}
-              />
-              <div className="callout">
-                <Info size={14} />
-                限速作用在代理与上游之间；Mock 响应同样会按下行带宽限速。
-              </div>
-            </div>
-          </section>
-        </div>
       </div>
     </div>
   );

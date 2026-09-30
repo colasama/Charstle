@@ -1,13 +1,30 @@
-import { Pencil, Plus, Trash2 } from 'lucide-react';
-import type { ParsedRule } from '../../types';
-import { Switch } from '../common/Controls';
-import { cx } from '../../utils/format';
-import { useUI } from '../../store/ui';
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import type { ParsedRule } from "../../types";
+import { Switch } from "../common/Controls";
+import { cx } from "../../utils/format";
+import { useUI } from "../../store/ui";
 
-const kindLabel = { domain: '域名', wildcard: '通配', regex: '正则', prefix: '前缀' };
+const kindLabel = {
+  domain: "域名",
+  wildcard: "通配",
+  regex: "正则",
+  prefix: "前缀",
+};
 
 /** 表格模式：展示解析后的规则。编辑仍然回写到文本（单一数据源）。 */
-export function RuleTable({ rules, groupId }: { rules: ParsedRule[]; groupId: string }) {
+export function RuleTable({
+  rules,
+  groupId,
+  onEdit,
+  onDelete,
+  onDisable,
+}: {
+  rules: ParsedRule[];
+  groupId: string;
+  onEdit: (line: number) => void;
+  onDelete: (line: number) => void;
+  onDisable: (line: number) => void;
+}) {
   const openModal = useUI((s) => s.openModal);
   return (
     <div className="scroll grow">
@@ -25,21 +42,31 @@ export function RuleTable({ rules, groupId }: { rules: ParsedRule[]; groupId: st
         </thead>
         <tbody>
           {rules.map((r) => (
-            <tr key={r.id} className={cx(!r.enabled && 'is-disabled')}>
+            <tr key={r.id} className={cx(!r.enabled && "is-disabled")}>
               <td className="faint mono">{r.line}</td>
               <td>
-                <Switch size="sm" on={r.enabled} />
+                <Switch
+                  size="sm"
+                  on={r.enabled}
+                  onChange={() => onDisable(r.line)}
+                />
               </td>
               <td>
                 <div className="row" style={{ gap: 6 }}>
-                  <span className="badge badge-outline">{kindLabel[r.patternKind]}</span>
+                  <span className="badge badge-outline">
+                    {kindLabel[r.patternKind]}
+                  </span>
                   <span className="pattern ellipsis">{r.pattern}</span>
                 </div>
               </td>
               <td>
                 <div className="actions">
                   {r.actions.map((a, i) => (
-                    <span key={i} className="action-chip" title={`${a.kind}://${a.value}`}>
+                    <span
+                      key={i}
+                      className="action-chip"
+                      title={`${a.kind}://${a.value}`}
+                    >
                       <b>{a.kind}</b>
                       <span>://{a.value}</span>
                     </span>
@@ -58,10 +85,18 @@ export function RuleTable({ rules, groupId }: { rules: ParsedRule[]; groupId: st
               </td>
               <td className="mono">{r.hitCount}</td>
               <td className="col-actions">
-                <button className="btn btn-ghost btn-icon btn-sm" data-tip="编辑" onClick={() => openModal({ type: 'ruleForm', groupId })}>
+                <button
+                  className="btn btn-ghost btn-icon btn-sm"
+                  data-tip="编辑"
+                  onClick={() => onEdit(r.line)}
+                >
                   <Pencil size={13} />
                 </button>
-                <button className="btn btn-ghost btn-icon btn-sm" data-tip="删除">
+                <button
+                  className="btn btn-ghost btn-icon btn-sm"
+                  data-tip="删除"
+                  onClick={() => onDelete(r.line)}
+                >
                   <Trash2 size={13} />
                 </button>
               </td>
@@ -70,7 +105,10 @@ export function RuleTable({ rules, groupId }: { rules: ParsedRule[]; groupId: st
         </tbody>
       </table>
       <div style={{ padding: 12 }}>
-        <button className="btn btn-sm" onClick={() => openModal({ type: 'ruleForm', groupId })}>
+        <button
+          className="btn btn-sm"
+          onClick={() => openModal({ type: "ruleForm", groupId })}
+        >
           <Plus size={13} /> 添加规则
         </button>
       </div>

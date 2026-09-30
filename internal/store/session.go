@@ -3,6 +3,7 @@ package store
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -113,7 +114,6 @@ type Summary struct {
 }
 
 func (s *Session) Summary() Summary {
-	// TODO: Type 由 Content-Type / 扩展名 / Upgrade 头推断（xhr、doc、js、css、img、media、font、ws、other）
 	sum := Summary{
 		ID:        s.ID,
 		ClientIP:  s.ClientIP,
@@ -135,6 +135,25 @@ func (s *Session) Summary() Summary {
 	}
 	if !s.Timing.End.IsZero() {
 		sum.Duration = s.Timing.End.Sub(s.Timing.Start).Milliseconds()
+	}
+	sum.Mime = s.RespHeader.Get("Content-Type")
+	switch {
+	case s.Proto == "WebSocket":
+		sum.Type = "ws"
+	case strings.Contains(sum.Mime, "json"):
+		sum.Type = "xhr"
+	case strings.Contains(sum.Mime, "html"):
+		sum.Type = "doc"
+	case strings.Contains(sum.Mime, "javascript"):
+		sum.Type = "js"
+	case strings.Contains(sum.Mime, "css"):
+		sum.Type = "css"
+	case strings.HasPrefix(sum.Mime, "image/"):
+		sum.Type = "img"
+	case strings.HasPrefix(sum.Mime, "audio/") || strings.HasPrefix(sum.Mime, "video/"):
+		sum.Type = "media"
+	case strings.Contains(sum.Mime, "font"):
+		sum.Type = "font"
 	}
 	return sum
 }

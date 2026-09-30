@@ -1,14 +1,22 @@
 module charstle
 
-go 1.25
+go 1.26.0
 
 // 前端依赖目录不参与 Go 包扫描
 ignore ./web/node_modules
 
-// 计划引入的依赖（按里程碑）：
-//   M2  golang.org/x/net/http2               HTTP/2（客户端侧 h2 服务 + 上游 h2）
-//   M2  github.com/andybalholm/brotli        br 解码
-//   M2  github.com/klauspost/compress/zstd   zstd 解码
-//   M3  modernc.org/sqlite                   规则 / Values / 设备持久化（纯 Go，免 CGO）
-//   M4  github.com/dop251/goja               JS Mock 脚本
-//   M4  github.com/coder/websocket           Admin 事件流 + WebSocket 帧捕获
+require (
+	github.com/andybalholm/brotli v1.2.6
+	github.com/coder/websocket v1.8.15
+	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9
+	github.com/klauspost/compress v1.20.1
+	golang.org/x/net v0.59.0
+	golang.org/x/sys v0.48.0
+)
+
+require (
+	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
+	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
+	golang.org/x/text v0.42.0 // indirect
+)

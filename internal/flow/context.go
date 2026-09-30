@@ -59,7 +59,9 @@ type Context struct {
 	ThrottleBytes int64 // bytes/s，0 = 不限
 
 	// 当前匹配规则的正则分组（$1、$2…）
-	Match []string
+	Match       []string
+	Pattern     string
+	PatternKind string
 }
 
 // Hit 记录命中的规则，展示在会话详情「规则」页签。

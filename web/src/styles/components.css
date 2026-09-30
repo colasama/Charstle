@@ -1010,3 +1010,4 @@
   border-radius: 999px;
   background: var(--accent);
 }
+.app-notice { position:fixed; z-index:2000; top:64px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:12px; max-width:80vw; padding:10px 16px; background:var(--bg-elevated,#fff); color:var(--text,#222); border:1px solid var(--border,#999); border-radius:8px; box-shadow:0 8px 30px #0002; }

@@ -1,52 +1,150 @@
 package store
 
 import (
-	"errors"
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	"io"
+	"os"
+	"strings"
+	"sync"
 )
 
-// BodyRef 指向一段捕获到的 body：小 body 在内存，大 body 落盘到 spill 目录。
 type BodyRef struct {
-	Size      int64  // 原始（传输）字节数
-	Truncated bool   // 超过捕获上限被截断
-	Encoding  string // Content-Encoding
+	Size      int64
+	Truncated bool
+	Encoding  string
 	inline    []byte
 	file      string
 }
 
-// Open 返回原始字节。
+func Body(data []byte) BodyRef {
+	return BodyRef{Size: int64(len(data)), inline: append([]byte(nil), data...)}
+}
 func (b *BodyRef) Open() (io.ReadCloser, error) {
-	// TODO: inline → bytes.Reader；file → os.Open
-	return nil, errors.New("BodyRef.Open: not implemented")
+	if b.file != "" {
+		return os.Open(b.file)
+	}
+	return io.NopCloser(bytes.NewReader(b.inline)), nil
 }
 
-// OpenDecoded 返回按 Content-Encoding 解码后的内容（gzip/br/zstd/deflate），仅用于展示。
+type decodedBody struct {
+	io.Reader
+	close func() error
+}
+
+func (d decodedBody) Close() error { return d.close() }
 func (b *BodyRef) OpenDecoded() (io.ReadCloser, error) {
-	// TODO
-	return nil, errors.New("BodyRef.OpenDecoded: not implemented")
+	raw, err := b.Open()
+	if err != nil {
+		return nil, err
+	}
+	var reader io.Reader = raw
+	var closer func() error
+	switch strings.ToLower(b.Encoding) {
+	case "gzip":
+		r, e := gzip.NewReader(raw)
+		if e != nil {
+			raw.Close()
+			return nil, e
+		}
+		reader = r
+		closer = r.Close
+	case "deflate":
+		r, e := zlib.NewReader(raw)
+		if e != nil {
+			raw.Close()
+			raw, e = b.Open()
+			if e != nil {
+				return nil, e
+			}
+			r = flate.NewReader(raw)
+		}
+		reader = r
+		closer = r.Close
+	case "br":
+		reader = brotli.NewReader(raw)
+	case "zstd":
+		r, e := zstd.NewReader(raw, zstd.WithDecoderMaxMemory(64<<20))
+		if e != nil {
+			raw.Close()
+			return nil, e
+		}
+		reader = r
+		closer = func() error { r.Close(); return nil }
+	}
+	return decodedBody{Reader: io.LimitReader(reader, 32<<20), close: func() error {
+		if closer != nil {
+			closer()
+		}
+		return raw.Close()
+	}}, nil
 }
 
-// Capture 包装一个 body 流：转发给下游的同时把前 limit 字节写入 BodyRef。
-// 必须是流式的——不能因为捕获而缓冲整个 body（SSE、大文件下载）。
 type Capture struct {
-	src   io.ReadCloser
-	limit int64
-	ref   *BodyRef
-	// TODO: 内存缓冲 + 超过阈值后切换到临时文件
+	src      io.ReadCloser
+	limit    int64
+	mu       sync.Mutex
+	ref      BodyRef
+	once     sync.Once
+	closeErr error
 }
 
-func NewCapture(src io.ReadCloser, limit int64, ref *BodyRef) *Capture {
-	return &Capture{src: src, limit: limit, ref: ref}
+func NewCapture(src io.ReadCloser, limit int64) *Capture {
+	if src == nil {
+		src = io.NopCloser(strings.NewReader(""))
+	}
+	return &Capture{src: src, limit: limit}
 }
-
 func (c *Capture) Read(p []byte) (int, error) {
 	n, err := c.src.Read(p)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.ref.Size += int64(n)
-	// TODO: 把 p[:n] 追加到捕获缓冲（不超过 limit，超出则标记 Truncated）
+	left := max(c.limit-int64(len(c.ref.inline)), 0)
+	keep := min(int64(n), left)
+	c.ref.inline = append(c.ref.inline, p[:keep]...)
+	if keep < int64(n) {
+		c.ref.Truncated = true
+	}
 	return n, err
 }
-
-func (c *Capture) Close() error {
-	// TODO: 收尾（关闭临时文件、通知 store 更新会话）
-	return c.src.Close()
+func (c *Capture) Close() error { c.once.Do(func() { c.closeErr = c.src.Close() }); return c.closeErr }
+func (c *Capture) Snapshot() BodyRef {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.ref
+	r.inline = append([]byte(nil), r.inline...)
+	return r
+}
+func (b *BodyRef) spill(dir string) error {
+	if len(b.inline) < 256<<10 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, "body-*")
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(b.inline); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	b.file = f.Name()
+	b.inline = nil
+	return nil
+}
+func (b *BodyRef) remove() {
+	if b.file != "" {
+		os.Remove(b.file)
+	}
 }

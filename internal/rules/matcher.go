@@ -1,57 +1,76 @@
 package rules
 
 import (
+	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 )
 
-// Matcher 判断一个 URL 是否命中 pattern，命中时返回正则分组（非正则 pattern 返回 [整个 URL]）。
 type Matcher interface {
-	Match(u *url.URL) (groups []string, ok bool)
+	Match(*url.URL) ([]string, bool)
+}
+type urlMatcher struct {
+	re     *regexp.Regexp
+	scheme bool
+	prefix string
 }
 
-// domainMatcher：精确域名，或带路径前缀（a.com/v1/）。
-type domainMatcher struct {
-	host       string
-	pathPrefix string
-}
-
-func (m *domainMatcher) Match(u *url.URL) ([]string, bool) {
-	// TODO
+func (m *urlMatcher) Match(u *url.URL) ([]string, bool) {
+	v := u.String()
+	if !m.scheme {
+		v = u.Host + u.RequestURI()
+	}
+	if m.re != nil {
+		g := m.re.FindStringSubmatch(v)
+		return g, g != nil
+	}
+	if strings.HasPrefix(v, m.prefix) {
+		return []string{m.prefix, strings.TrimPrefix(v, m.prefix)}, true
+	}
 	return nil, false
 }
-
-// wildcardMatcher：*.a.com、a.com/api/*
-type wildcardMatcher struct {
-	re *regexp.Regexp // 编译后的等价正则
+func Compile(pattern string) (Matcher, PatternKind, error) {
+	if pattern == "" {
+		return nil, "", fmt.Errorf("empty pattern")
+	}
+	if strings.HasPrefix(pattern, "/") {
+		i := strings.LastIndex(pattern, "/")
+		if i <= 0 {
+			return nil, "", fmt.Errorf("unterminated regexp")
+		}
+		expr := pattern[1:i]
+		if pattern[i+1:] == "i" {
+			expr = "(?i)" + expr
+		} else if pattern[i+1:] != "" {
+			return nil, "", fmt.Errorf("invalid regexp flags")
+		}
+		re, err := regexp.Compile(expr)
+		return &urlMatcher{re: re, scheme: true}, PatternRegex, err
+	}
+	scheme := strings.Contains(pattern, "://")
+	if strings.ContainsAny(pattern, "*?") {
+		expr := regexp.QuoteMeta(pattern)
+		expr = strings.ReplaceAll(expr, "\\*", ".*")
+		expr = strings.ReplaceAll(expr, "\\?", ".")
+		if !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(pattern, "https://"), "http://"), "/") {
+			expr += "(?:/.*)?"
+		}
+		re, err := regexp.Compile("(?i)^" + expr + "$")
+		return &urlMatcher{re: re, scheme: scheme}, PatternWildcard, err
+	}
+	bare := strings.TrimPrefix(strings.TrimPrefix(pattern, "https://"), "http://")
+	if !strings.Contains(bare, "/") {
+		re, err := regexp.Compile("(?i)^" + regexp.QuoteMeta(pattern) + "(?::[0-9]+)?(?:/.*)?$")
+		return &urlMatcher{re: re, scheme: scheme}, PatternDomain, err
+	}
+	return &urlMatcher{prefix: pattern, scheme: scheme}, PatternPrefix, nil
 }
-
-func (m *wildcardMatcher) Match(u *url.URL) ([]string, bool) {
-	// TODO
-	return nil, false
-}
-
-type regexMatcher struct {
-	re *regexp.Regexp
-}
-
-func (m *regexMatcher) Match(u *url.URL) ([]string, bool) {
-	g := m.re.FindStringSubmatch(u.String())
-	return g, g != nil
-}
-
-// domainIndex 是纯域名规则的反向域名 trie（com → example → api），
-// 让大部分规则 O(域名层级) 查找，通配/正则规则才需要线性扫描。
-type domainIndex struct {
-	children map[string]*domainIndex
-	rules    []*Rule // 按原始顺序
-}
-
-func (d *domainIndex) insert(host string, r *Rule) {
-	// TODO
-}
-
-func (d *domainIndex) lookup(host string) []*Rule {
-	// TODO
-	return nil
+func Matches(pattern string, u *url.URL) bool {
+	m, _, err := Compile(pattern)
+	if err != nil {
+		return false
+	}
+	_, ok := m.Match(u)
+	return ok
 }

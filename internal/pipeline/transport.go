@@ -1,60 +1,95 @@
 package pipeline
 
 import (
-	"context"
-	"crypto/tls"
-	"fmt"
-	"net"
-	"net/http"
-	"time"
-
 	"charstle/internal/config"
 	"charstle/internal/flow"
+	"charstle/internal/netutil"
+	"charstle/internal/rules"
+	"crypto/tls"
+	"fmt"
+	"net/http"
+	"net/http/httptrace"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
 )
 
-func errNotImplemented(what string) error {
-	return fmt.Errorf("%s: not implemented", what)
-}
-
-type dialAddrKey struct{}
-
-// Transport 负责与上游通信：上游代理链、自定义 DNS、host 规则的拨号地址覆盖。
 type Transport struct {
 	cfg config.Upstream
 	rt  *http.Transport
 }
 
 func NewTransport(cfg config.Upstream) *Transport {
-	d := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
-	t := &Transport{cfg: cfg}
-	t.rt = &http.Transport{
-		// 注意：连接池的 key 必须是实际拨号地址。host 规则改写时通过 context 传入 DialAddr，
-		// 这里拨到覆盖地址；由于 http.Transport 按 URL host 做连接池 key，
-		// 需要为「原 host + 覆盖地址」组合区分连接（TODO：改用自定义 key 或按覆盖地址分池）。
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if override, ok := ctx.Value(dialAddrKey{}).(string); ok && override != "" {
-				addr = override
+	d := netutil.NewDialer(cfg)
+	rt := &http.Transport{DialContext: d.DialContext, TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureTLS}, ForceAttemptHTTP2: true, MaxIdleConnsPerHost: 16, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 60 * time.Second, DisableCompression: true}
+	rt.Proxy = func(r *http.Request) (*url.URL, error) {
+		if cfg.Proxy == "" {
+			return nil, nil
+		}
+		for _, p := range cfg.Bypass {
+			if rules.Matches(p, r.URL) {
+				return nil, nil
 			}
-			// TODO: 自定义 DNS / hosts 文件 / 上游 socks5
-			return d.DialContext(ctx, network, addr)
-		},
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: cfg.InsecureTLS},
-		ForceAttemptHTTP2:   true,
-		MaxIdleConnsPerHost: 16,
-		IdleConnTimeout:     90 * time.Second,
-		// 不自动解压：原样转发字节，展示时再解码
-		DisableCompression: true,
-		// TODO: Proxy: 上游 HTTP 代理 + Bypass 列表
+		}
+		return url.Parse(cfg.Proxy)
 	}
-	return t
+	return &Transport{cfg, rt}
 }
-
-// RoundTrip 发送 ctx.Req 到 ctx.Target，结果写入 ctx.Resp，并记录 DNS/连接/TLS/TTFB 时间点（httptrace）。
-func (t *Transport) RoundTrip(ctx *flow.Context) error {
-	// TODO:
-	//   out := ctx.Req.Clone(context.WithValue(ctx.Req.Context(), dialAddrKey{}, ctx.DialAddr))
-	//   out.URL = ctx.Target；out.RequestURI = ""；去掉 hop-by-hop 头（Proxy-Connection 等）
-	//   httptrace.WithClientTrace → 填 ctx.Session.Timing
-	//   resp, err := t.rt.RoundTrip(out)
-	return errNotImplemented("Transport.RoundTrip")
+func stripHop(h http.Header) {
+	for _, v := range h.Values("Connection") {
+		for _, k := range strings.Split(v, ",") {
+			h.Del(strings.TrimSpace(k))
+		}
+	}
+	for _, k := range []string{"Connection", "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade"} {
+		h.Del(k)
+	}
 }
+func (t *Transport) RoundTrip(c *flow.Context) error {
+	out := c.Req.Clone(c.Req.Context())
+	target := *c.Target
+	out.URL = &target
+	out.RequestURI = ""
+	out.Header = c.Req.Header.Clone()
+	if c.Session.Remapped && c.DialAddr == "" {
+		out.Host = target.Host
+	}
+	upgrade := strings.EqualFold(out.Header.Get("Upgrade"), "websocket")
+	stripHop(out.Header)
+	if upgrade {
+		out.Header.Set("Connection", "Upgrade")
+		out.Header.Set("Upgrade", "websocket")
+	}
+	rt := t.rt
+	if c.DialAddr != "" {
+		rt = t.rt.Clone()
+		out.URL.Host = c.DialAddr
+		rt.TLSClientConfig = rt.TLSClientConfig.Clone()
+		rt.TLSClientConfig.ServerName = c.Target.Hostname()
+		rt.DisableKeepAlives = true
+		defer rt.CloseIdleConnections()
+	}
+	// HTTP/2 trace callbacks may outlive RoundTrip. Copy their private snapshot
+	// under a lock instead of letting callbacks mutate the published session.
+	var mu sync.Mutex
+	timing, remote := c.Session.Timing, c.Session.Remote
+	stamp := func(target *time.Time) { mu.Lock(); *target = time.Now(); mu.Unlock() }
+	trace := &httptrace.ClientTrace{DNSStart: func(httptrace.DNSStartInfo) { stamp(&timing.DNSStart) }, DNSDone: func(httptrace.DNSDoneInfo) { stamp(&timing.DNSDone) }, GotConn: func(i httptrace.GotConnInfo) {
+		mu.Lock()
+		remote = i.Conn.RemoteAddr().String()
+		timing.Connect = time.Now()
+		mu.Unlock()
+	}, TLSHandshakeDone: func(tls.ConnectionState, error) { stamp(&timing.TLSDone) }, WroteRequest: func(httptrace.WroteRequestInfo) { stamp(&timing.WroteReq) }, GotFirstResponseByte: func() { stamp(&timing.TTFB) }}
+	out = out.WithContext(httptrace.WithClientTrace(out.Context(), trace))
+	resp, err := rt.RoundTrip(out)
+	mu.Lock()
+	c.Session.Timing, c.Session.Remote = timing, remote
+	mu.Unlock()
+	c.Resp = resp
+	if err != nil {
+		return fmt.Errorf("upstream: %w", err)
+	}
+	return nil
+}
+func (t *Transport) Close() { t.rt.CloseIdleConnections() }

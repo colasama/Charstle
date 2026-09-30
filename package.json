@@ -1,0 +1,36 @@
+{
+  "name": "charstle",
+  "version": "0.1.0",
+  "description": "Local HTTP/HTTPS debugging proxy with an embedded web UI",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/colasama/Charstle.git"
+  },
+  "homepage": "https://github.com/colasama/Charstle",
+  "bin": {
+    "charstle": "npm/cli.cjs"
+  },
+  "files": [
+    "npm/cli.cjs",
+    "README.md",
+    "docs/DISTRIBUTION.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build:web": "npm --prefix web ci && npm --prefix web run build",
+    "build:release": "node scripts/package.mjs",
+    "test:launcher": "node --test npm/cli.test.cjs",
+    "prepublishOnly": "node scripts/check-publish.mjs"
+  },
+  "optionalDependencies": {
+    "charstle-win32-x64": "0.1.0",
+    "charstle-win32-arm64": "0.1.0",
+    "charstle-darwin-x64": "0.1.0",
+    "charstle-darwin-arm64": "0.1.0",
+    "charstle-linux-x64": "0.1.0",
+    "charstle-linux-arm64": "0.1.0"
+  }
+}

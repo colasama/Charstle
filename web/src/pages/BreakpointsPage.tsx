@@ -1,144 +1,212 @@
-import { OctagonPause, Pencil, Play, Plus, Trash2, X, Info } from 'lucide-react';
-import { PageHeader, Switch, EmptyState } from '../components/common/Controls';
-import { MethodText } from '../components/common/Badges';
-import { useUI } from '../store/ui';
-import { mockBreakpoints, mockPaused } from '../mock/data';
-import { cx } from '../utils/format';
-
-function waited(ts: number) {
-  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-}
-
+import { useEffect, useState } from "react";
+import { PageHeader, Switch, EmptyState } from "../components/common/Controls";
+import { AsyncButton } from "../components/common/AsyncButton";
+import { useData, toggleGlobal } from "../store/data";
+import { useUI } from "../store/ui";
+import { api } from "../api/client";
+import type { BreakpointRule } from "../types";
 export function BreakpointsPage() {
-  const { breakpoints: enabled, toggle, openModal } = useUI();
-  // TODO(api): 断点规则 /api/breakpoints；拦截队列来自事件流 breakpoint.paused
-  const rules = mockBreakpoints;
-  const paused = mockPaused;
-
+  const { breakpoints, paused } = useData();
+  const enabled = useUI((s) => s.breakpoints);
+  const [draft, setDraft] = useState(breakpoints);
+  useEffect(() => setDraft(breakpoints), [JSON.stringify(breakpoints)]);
+  const patch = (id: string, p: Partial<BreakpointRule>) =>
+    setDraft((v) => v.map((r) => (r.id === id ? { ...r, ...p } : r)));
   return (
     <div className="page">
       <PageHeader
-        icon={<OctagonPause size={18} />}
         title="断点"
-        desc="拦截匹配的请求或响应，手动修改后再放行。客户端会一直等待直到你处理（或超时）。"
+        desc="拦截请求或响应，修改后放行；默认等待 5 分钟后自动继续。"
         actions={
-          <>
-            <span className="muted text-sm">{enabled ? '断点已启用' : '断点已停用'}</span>
-            <Switch on={enabled} onChange={() => toggle('breakpoints')} />
-          </>
+          <Switch
+            label="启用断点"
+            on={enabled}
+            onChange={() => void toggleGlobal("breakpoints")}
+          />
         }
       />
       <div className="page-content">
         <section className="card">
           <div className="card-header">
-            <span className="card-title">等待处理</span>
-            {paused.length > 0 && <span className="badge badge-warning badge-pill">{paused.length}</span>}
-            <div className="spacer" />
-            <button className="btn btn-sm" disabled={!paused.length}>
-              <Play size={13} /> 全部放行
-            </button>
-            <button className="btn btn-sm btn-danger" disabled={!paused.length}>
-              <X size={13} /> 全部中止
-            </button>
+            <b className="grow">等待处理 · {paused.length}</b>
+            <AsyncButton
+              className="btn btn-sm"
+              disabled={!paused.length}
+              run={() =>
+                Promise.all(
+                  paused.map((p) => api.resolvePaused(p.id, "continue")),
+                )
+              }
+            >
+              全部放行
+            </AsyncButton>
+            <AsyncButton
+              className="btn btn-danger btn-sm"
+              disabled={!paused.length}
+              run={() =>
+                Promise.all(paused.map((p) => api.resolvePaused(p.id, "abort")))
+              }
+            >
+              全部中止
+            </AsyncButton>
           </div>
           <div className="card-body">
             {paused.length ? (
-              <div className="paused-list">
-                {paused.map((p) => (
-                  <div key={p.id} className="paused-card">
-                    <span className={cx('badge', p.phase === 'request' ? 'badge-accent' : 'badge-success')}>{p.phase === 'request' ? '请求' : '响应'}</span>
-                    <MethodText method={p.method} />
-                    <div className="grow" style={{ minWidth: 0 }}>
-                      <div className="paused-url ellipsis">{p.url}</div>
-                      <div className="muted text-xs">
-                        {p.device} · {p.clientIp} · 会话 #{p.sessionId}
-                      </div>
-                    </div>
-                    <span className="paused-timer" data-tip="已等待">
-                      {waited(p.pausedAt)}
-                    </span>
-                    <button className="btn btn-sm btn-primary" onClick={() => openModal({ type: 'breakpoint', id: p.id })}>
-                      <Pencil size={13} /> 编辑
-                    </button>
-                    <button className="btn btn-sm">
-                      <Play size={13} /> 放行
-                    </button>
-                    <button className="btn btn-sm btn-danger">
-                      <X size={13} /> 中止
-                    </button>
-                  </div>
-                ))}
-              </div>
+              paused.map((p) => (
+                <div className="paused-card" key={p.id}>
+                  <span className="badge">
+                    {p.phase === "request" ? "请求" : "响应"}
+                  </span>
+                  <span>{p.method}</span>
+                  <span className="grow ellipsis">{p.url}</span>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() =>
+                      useUI
+                        .getState()
+                        .openModal({ type: "breakpoint", id: p.id })
+                    }
+                  >
+                    编辑
+                  </button>
+                  <AsyncButton
+                    className="btn btn-sm"
+                    run={() => api.resolvePaused(p.id, "continue")}
+                  >
+                    放行
+                  </AsyncButton>
+                  <AsyncButton
+                    className="btn btn-sm btn-danger"
+                    run={() => api.resolvePaused(p.id, "abort")}
+                  >
+                    中止
+                  </AsyncButton>
+                </div>
+              ))
             ) : (
-              <EmptyState title="没有被拦截的请求" desc="命中下方断点规则的请求会出现在这里" />
+              <EmptyState title="没有被拦截的请求" />
             )}
           </div>
         </section>
-
         <section className="card">
           <div className="card-header">
-            <span className="card-title">断点规则</span>
-            <span className="card-subtitle">pattern 语法与规则页相同</span>
-            <div className="spacer" />
-            <button className="btn btn-sm btn-primary">
-              <Plus size={13} /> 添加断点
+            <b className="grow">断点规则</b>
+            <button
+              className="btn btn-sm"
+              onClick={() =>
+                setDraft((v) => [
+                  ...v,
+                  {
+                    id: crypto.randomUUID(),
+                    enabled: true,
+                    pattern: "example.com",
+                    method: "*",
+                    request: true,
+                    response: false,
+                    hitCount: 0,
+                  },
+                ])
+              }
+            >
+              添加断点
             </button>
+            <AsyncButton
+              className="btn btn-primary btn-sm"
+              run={() => api.saveBreakpoints(draft)}
+              message="断点规则已保存"
+            >
+              保存规则
+            </AsyncButton>
           </div>
           <div className="card-body flush">
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 60 }}>启用</th>
+                  <th>启用</th>
                   <th>匹配</th>
-                  <th style={{ width: 110 }}>方法</th>
-                  <th style={{ width: 90 }}>请求</th>
-                  <th style={{ width: 90 }}>响应</th>
-                  <th style={{ width: 80 }}>命中</th>
-                  <th className="col-actions" />
+                  <th>方法</th>
+                  <th>请求</th>
+                  <th>响应</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {rules.map((r) => (
+                {draft.map((r) => (
                   <tr key={r.id}>
                     <td>
-                      <Switch size="sm" on={r.enabled} />
+                      <Switch
+                        on={r.enabled}
+                        onChange={(enabled) => patch(r.id, { enabled })}
+                      />
                     </td>
                     <td>
-                      <input className="input input-sm mono" defaultValue={r.pattern} />
+                      <input
+                        aria-label="断点匹配"
+                        className="input"
+                        value={r.pattern}
+                        onChange={(e) =>
+                          patch(r.id, { pattern: e.target.value })
+                        }
+                      />
                     </td>
                     <td>
-                      <select className="select input-sm" defaultValue={r.method}>
-                        <option value="*">全部</option>
-                        <option>GET</option>
-                        <option>POST</option>
-                        <option>PUT</option>
-                        <option>PATCH</option>
-                        <option>DELETE</option>
+                      <select
+                        className="select"
+                        value={r.method}
+                        onChange={(e) =>
+                          patch(r.id, {
+                            method: e.target.value as BreakpointRule["method"],
+                          })
+                        }
+                      >
+                        {[
+                          "*",
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE",
+                          "HEAD",
+                          "OPTIONS",
+                        ].map((m) => (
+                          <option key={m}>{m}</option>
+                        ))}
                       </select>
                     </td>
                     <td>
-                      <input type="checkbox" defaultChecked={r.request} />
+                      <input
+                        aria-label="请求断点"
+                        type="checkbox"
+                        checked={r.request}
+                        onChange={(e) =>
+                          patch(r.id, { request: e.target.checked })
+                        }
+                      />
                     </td>
                     <td>
-                      <input type="checkbox" defaultChecked={r.response} />
+                      <input
+                        aria-label="响应断点"
+                        type="checkbox"
+                        checked={r.response}
+                        onChange={(e) =>
+                          patch(r.id, { response: e.target.checked })
+                        }
+                      />
                     </td>
-                    <td className="mono">{r.hitCount}</td>
-                    <td className="col-actions">
-                      <button className="btn btn-ghost btn-icon btn-sm" data-tip="删除">
-                        <Trash2 size={13} />
+                    <td>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() =>
+                          setDraft((v) => v.filter((b) => b.id !== r.id))
+                        }
+                      >
+                        删除
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-          <div className="card-footer">
-            <div className="callout" style={{ flex: 1 }}>
-              <Info size={14} />
-              拦截超过 5 分钟未处理会自动放行，可在「设置 → 抓包」中修改。
-            </div>
           </div>
         </section>
       </div>

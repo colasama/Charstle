@@ -1,111 +1,121 @@
-import { Plus, Trash2, Waypoints } from 'lucide-react';
-import { Modal } from '../common/Modal';
-import { actionDocs, mockRuleGroups } from '../../mock/data';
-
-/** 表单方式添加规则，保存时生成一行文本追加到规则组 */
-export function RuleFormModal({ groupId, onClose }: { groupId?: string; onClose: () => void }) {
-  // TODO: 表单 → 规则文本；实时预览
+import { useState } from "react";
+import { Modal } from "../common/Modal";
+import { AsyncButton } from "../common/AsyncButton";
+import { api } from "../../api/client";
+import { useData } from "../../store/data";
+import { actionDocs } from "../../data/reference";
+export function RuleFormModal({
+  groupId,
+  onClose,
+}: {
+  groupId?: string;
+  onClose: () => void;
+}) {
+  const groups = useData((s) => s.groups);
+  const [id, setID] = useState(groupId ?? groups[0]?.id ?? ""),
+    [pattern, setPattern] = useState(""),
+    [kind, setKind] = useState("mock"),
+    [value, setValue] = useState(""),
+    [method, setMethod] = useState("*"),
+    [ip, setIP] = useState("");
+  const line = [
+    pattern,
+    kind + "://" + value,
+    method === "*" ? "" : "method=" + method,
+    ip ? "clientIp=" + ip : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <Modal
-      size="lg"
       title="添加规则"
-      icon={<Waypoints size={18} className="muted" />}
       onClose={onClose}
       footer={
-        <>
-          <button className="btn" onClick={onClose}>
-            取消
-          </button>
-          <button className="btn btn-primary" onClick={onClose}>
-            添加
-          </button>
-        </>
+        <AsyncButton
+          className="btn btn-primary"
+          disabled={!id || !pattern}
+          run={async () => {
+            const latest = (await api.listRuleGroups()).find(
+              (g) => g.id === id,
+            );
+            if (!latest) throw Error("规则组不存在");
+            await api.saveRuleGroup({
+              ...latest,
+              content: latest.content + "\n" + line + "\n",
+            });
+            onClose();
+          }}
+          message="规则已添加"
+        >
+          添加
+        </AsyncButton>
       }
     >
-      <div className="col" style={{ gap: 16 }}>
-        <div className="grid-2" style={{ gridTemplateColumns: '160px 1fr' }}>
-          <div className="field">
-            <label>匹配方式</label>
-            <select className="select">
-              <option>域名 / 前缀</option>
-              <option>通配符</option>
-              <option>正则</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Pattern</label>
-            <input className="input mono" placeholder="api.example.com/v1/user" />
-          </div>
-        </div>
-
-        <div className="field">
-          <label>动作</label>
-          {[{ kind: 'mock', value: '{userInfo}' }, { kind: 'delay', value: '500' }].map((a, i) => (
-            <div key={i} className="row">
-              <select className="select mono" style={{ width: 160 }} defaultValue={a.kind}>
-                {actionDocs.map((d) => (
-                  <option key={d.kind} value={d.kind}>
-                    {d.kind}
-                  </option>
-                ))}
-              </select>
-              <input className="input mono" defaultValue={a.value} />
-              <button className="btn btn-ghost btn-icon" aria-label="删除">
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-          <div>
-            <button className="btn btn-sm btn-ghost">
-              <Plus size={13} /> 添加动作
-            </button>
-          </div>
-        </div>
-
-        <div className="grid-2">
-          <div className="field">
-            <label>仅限方法</label>
-            <select className="select">
-              <option>全部</option>
-              <option>GET</option>
-              <option>POST</option>
-              <option>PUT</option>
-              <option>DELETE</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>仅限客户端 IP</label>
-            <input className="input mono" placeholder="全部设备" />
-          </div>
-        </div>
-
-        <div className="grid-2">
-          <div className="field">
-            <label>添加到规则组</label>
-            <select className="select" defaultValue={groupId}>
-              {mockRuleGroups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>位置</label>
-            <select className="select">
-              <option>末尾</option>
-              <option>开头（最高优先级）</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="field">
-          <label>预览</label>
-          <div className="syntax-card">
-            <span className="p">api.example.com/v1/user</span> <span className="k">mock://</span>
-            <span className="r">{'{userInfo}'}</span> <span className="k">delay://</span>500
-          </div>
-        </div>
+      <div className="col">
+        <label>
+          规则组
+          <select
+            className="select"
+            value={id}
+            onChange={(e) => setID(e.target.value)}
+          >
+            {groups.map((g) => (
+              <option value={g.id} key={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          匹配
+          <input
+            className="input mono"
+            placeholder="example.com/api/"
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+          />
+        </label>
+        <label>
+          动作
+          <select
+            className="select"
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+          >
+            {actionDocs.map((a) => (
+              <option key={a.kind}>{a.kind}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          值
+          <input
+            className="input mono"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </label>
+        <label>
+          方法
+          <select
+            className="select"
+            value={method}
+            onChange={(e) => setMethod(e.target.value)}
+          >
+            {["*", "GET", "POST", "PUT", "DELETE", "OPTIONS"].map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          客户端 IP
+          <input
+            className="input mono"
+            value={ip}
+            onChange={(e) => setIP(e.target.value)}
+          />
+        </label>
+        <code>{line}</code>
       </div>
     </Modal>
   );

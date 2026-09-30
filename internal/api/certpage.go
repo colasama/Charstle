@@ -2,8 +2,12 @@ package api
 
 import (
 	_ "embed"
+	"fmt"
 	"html/template"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"charstle/internal/config"
 	"charstle/internal/mitm"
@@ -39,15 +43,30 @@ func CertPageHandler(ca *mitm.CA, cfg *config.Config) http.Handler {
 	mux.HandleFunc("GET /charstle-ca.pem", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-pem-file")
 		w.Header().Set("Content-Disposition", `attachment; filename="charstle-ca.pem"`)
-		w.Write(ca.CertPEM)
+		w.Write(ca.PEM())
 	})
 	mux.HandleFunc("GET /charstle.mobileconfig", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: ca.MobileConfig()
-		http.Error(w, "not implemented", http.StatusNotImplemented)
+		data, err := ca.MobileConfig()
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-apple-aspen-config")
+		w.Write(data)
 	})
 	mux.HandleFunc("GET /proxy.pac", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: 生成 PAC：function FindProxyForURL(url, host) { return "PROXY <ip>:<port>; DIRECT"; }
-		http.Error(w, "not implemented", http.StatusNotImplemented)
+		host := strings.Split(r.Host, ":")[0]
+		if host == "charstle.pro" || net.ParseIP(host) == nil {
+			host = "127.0.0.1"
+			for _, a := range proxyAddresses() {
+				if a.Primary {
+					host = a.IP
+					break
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
+		fmt.Fprintf(w, "function FindProxyForURL(url, host) { if (isPlainHostName(host) || host === 'localhost' || host === '127.0.0.1') return 'DIRECT'; return %q; }", "PROXY "+net.JoinHostPort(host, strconv.Itoa(cfg.ProxyPort))+"; DIRECT")
 	})
 	return mux
 }

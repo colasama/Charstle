@@ -1,22 +1,34 @@
-import { Fragment } from 'react';
-import { NavLink } from 'react-router-dom';
-import { navGroups, settingsNav, type NavItem } from './nav';
-import { cx } from '../../utils/format';
+import { Fragment } from "react";
+import { NavLink } from "react-router-dom";
+import { navGroups, settingsNav, type NavItem } from "./nav";
+import { cx } from "../../utils/format";
 
-// TODO(api): 角标数据来自事件流（待处理断点数、待授权设备数）
-const badges: Record<string, { count: number; tone?: 'warning' }> = {
-  '/breakpoints': { count: 2, tone: 'warning' },
-  '/devices': { count: 1 },
-};
+import { useData } from "../../store/data";
 
 function Item({ item }: { item: NavItem }) {
   const Icon = item.icon;
-  const badge = badges[item.path];
+  const { devices, paused } = useData();
+  const count =
+    item.path === "/breakpoints"
+      ? paused.length
+      : item.path === "/devices"
+        ? devices.filter((d) => d.status === "pending").length
+        : 0;
+  const badge = count ? { count, tone: "warning" } : undefined;
   return (
-    <NavLink to={item.path} className={({ isActive }) => cx('nav-item', isActive && 'active')} data-tip={item.title} data-tip-pos="right">
+    <NavLink
+      to={item.path}
+      className={({ isActive }) => cx("nav-item", isActive && "active")}
+      data-tip={item.title}
+      data-tip-pos="right"
+    >
       <Icon size={18} strokeWidth={1.8} />
       <span>{item.label}</span>
-      {badge && <span className={cx('nav-badge', badge.tone && `tone-${badge.tone}`)}>{badge.count}</span>}
+      {badge && (
+        <span className={cx("nav-badge", badge.tone && `tone-${badge.tone}`)}>
+          {badge.count}
+        </span>
+      )}
     </NavLink>
   );
 }

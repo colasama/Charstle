@@ -2,24 +2,24 @@
  * 纯界面状态（主题、选中项、面板布局、弹窗、全局开关的显示状态）。
  * 业务数据（会话、规则…）接入后端后另建 store，不要塞进这里。
  */
-import { create } from 'zustand';
-import type { ResourceType } from '../types';
+import { create } from "zustand";
+import type { ResourceType } from "../types";
 
-export type ThemeMode = 'system' | 'light' | 'dark';
+export type ThemeMode = "system" | "light" | "dark";
 
 export type ModalState =
-  | { type: 'deviceApproval'; ip: string }
-  | { type: 'breakpoint'; id: string }
-  | { type: 'harImport' }
-  | { type: 'shortcuts' }
-  | { type: 'ruleForm'; groupId?: string }
-  | { type: 'connectGuide' }
-  | { type: 'confirm'; title: string; message: string; danger?: boolean };
+  | { type: "deviceApproval"; ip: string }
+  | { type: "breakpoint"; id: string }
+  | { type: "harImport" }
+  | { type: "shortcuts" }
+  | { type: "ruleForm"; groupId?: string }
+  | { type: "connectGuide" }
+  | { type: "confirm"; title: string; message: string; danger?: boolean };
 
 export interface NetworkFilter {
   keyword: string;
   types: ResourceType[];
-  status: 'all' | '2xx' | '3xx' | '4xx' | '5xx' | 'error';
+  status: "all" | "2xx" | "3xx" | "4xx" | "5xx" | "error";
   clientIp: string; // '' = 全部设备
   onlyMatched: boolean;
   hideTunnels: boolean;
@@ -35,15 +35,22 @@ interface UIState {
   breakpoints: boolean;
   throttling: boolean;
   systemProxy: boolean;
-  toggle: (key: 'recording' | 'sslProxying' | 'breakpoints' | 'throttling' | 'systemProxy') => void;
+  toggle: (
+    key:
+      | "recording"
+      | "sslProxying"
+      | "breakpoints"
+      | "throttling"
+      | "systemProxy",
+  ) => void;
 
   // Network 页
   selectedSessionId: number | null;
   selectSession: (id: number | null) => void;
-  networkView: 'list' | 'structure';
-  setNetworkView: (v: 'list' | 'structure') => void;
-  detailPlacement: 'right' | 'bottom';
-  setDetailPlacement: (v: 'right' | 'bottom') => void;
+  networkView: "list" | "structure";
+  setNetworkView: (v: "list" | "structure") => void;
+  detailPlacement: "right" | "bottom";
+  setDetailPlacement: (v: "right" | "bottom") => void;
   filter: NetworkFilter;
   setFilter: (patch: Partial<NetworkFilter>) => void;
 
@@ -55,9 +62,9 @@ interface UIState {
 
 const readTheme = (): ThemeMode => {
   try {
-    return (localStorage.getItem('charstle.theme') as ThemeMode) || 'system';
+    return (localStorage.getItem("charstle.theme") as ThemeMode) || "system";
   } catch {
-    return 'system';
+    return "system";
   }
 };
 
@@ -65,7 +72,7 @@ export const useUI = create<UIState>((set) => ({
   theme: readTheme(),
   setTheme: (theme) => {
     try {
-      localStorage.setItem('charstle.theme', theme);
+      localStorage.setItem("charstle.theme", theme);
     } catch {
       /* ignore */
     }
@@ -79,13 +86,20 @@ export const useUI = create<UIState>((set) => ({
   systemProxy: false,
   toggle: (key) => set((s) => ({ [key]: !s[key] }) as Partial<UIState>),
 
-  selectedSessionId: 4,
+  selectedSessionId: null,
   selectSession: (selectedSessionId) => set({ selectedSessionId }),
-  networkView: 'list',
+  networkView: "list",
   setNetworkView: (networkView) => set({ networkView }),
-  detailPlacement: 'right',
+  detailPlacement: "right",
   setDetailPlacement: (detailPlacement) => set({ detailPlacement }),
-  filter: { keyword: '', types: [], status: 'all', clientIp: '', onlyMatched: false, hideTunnels: false },
+  filter: {
+    keyword: "",
+    types: [],
+    status: "all",
+    clientIp: "",
+    onlyMatched: false,
+    hideTunnels: false,
+  },
   setFilter: (patch) => set((s) => ({ filter: { ...s.filter, ...patch } })),
 
   modal: null,

@@ -18,3 +18,5 @@ desktop/build/
 .vscode/
 .DS_Store
 Thumbs.db
+/dist/
+/node_modules/

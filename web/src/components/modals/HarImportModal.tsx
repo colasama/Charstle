@@ -1,55 +1,46 @@
-import { useState } from 'react';
-import { FileUp, UploadCloud } from 'lucide-react';
-import { Modal } from '../common/Modal';
-import { cx } from '../../utils/format';
-
+import { useState } from "react";
+import { Modal } from "../common/Modal";
+import { AsyncButton } from "../common/AsyncButton";
+import { api } from "../../api/client";
 export function HarImportModal({ onClose }: { onClose: () => void }) {
-  const [over, setOver] = useState(false);
-  // TODO(api): api.importHar(file)
+  const [file, setFile] = useState<File | null>(null);
   return (
     <Modal
       title="导入 HAR"
-      icon={<FileUp size={18} className="muted" />}
       onClose={onClose}
       footer={
-        <>
-          <button className="btn" onClick={onClose}>
-            取消
-          </button>
-          <button className="btn btn-primary" disabled>
-            导入
-          </button>
-        </>
+        <AsyncButton
+          className="btn btn-primary"
+          disabled={!file}
+          run={async () => {
+            if (file) {
+              await api.importHar(file);
+              onClose();
+            }
+          }}
+          message="HAR 已导入"
+        >
+          导入
+        </AsyncButton>
       }
     >
       <div
-        className={cx('dropzone', over && 'is-over')}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setOver(true);
-        }}
-        onDragLeave={() => setOver(false)}
+        className="dropzone"
+        onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
-          setOver(false);
+          setFile(e.dataTransfer.files[0] ?? null);
         }}
       >
-        <UploadCloud size={28} />
-        <div style={{ fontWeight: 600 }}>拖拽 .har 文件到这里</div>
-        <div className="text-sm">或</div>
-        <label className="btn btn-sm">
-          选择文件
-          <input type="file" accept=".har,application/json" hidden />
-        </label>
+        <p>{file?.name ?? "拖拽 .har 文件到这里"}</p>
+        <input
+          type="file"
+          aria-label="选择 HAR 文件"
+          accept=".har,.json,application/json"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
       </div>
-      <div className="col" style={{ marginTop: 16, gap: 8 }}>
-        <label className="check-label">
-          <input type="radio" name="har-mode" defaultChecked /> 追加到当前会话列表
-        </label>
-        <label className="check-label">
-          <input type="radio" name="har-mode" /> 清空当前会话后导入
-        </label>
-      </div>
+      <p className="muted">导入的会话将追加到当前列表。</p>
     </Modal>
   );
 }

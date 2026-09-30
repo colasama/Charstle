@@ -1,40 +1,139 @@
 package rules
 
 import (
-	"bufio"
+	"charstle/internal/flow"
+	"fmt"
 	"strings"
+	"unicode"
 )
 
-// Parse 把一个规则组的文本解析为规则列表。出错的行跳过并记录诊断，不影响其它行。
 func Parse(g Group) ([]*Rule, []Diagnostic) {
-	var (
-		out   []*Rule
-		diags []Diagnostic
-	)
-	sc := bufio.NewScanner(strings.NewReader(g.Content))
-	line := 0
-	for sc.Scan() {
-		line++
-		text := strings.TrimSpace(sc.Text())
+	out := []*Rule{}
+	diags := []Diagnostic{}
+	for i, line := range strings.Split(g.Content, "\n") {
+		text := strings.TrimSpace(line)
 		if text == "" || strings.HasPrefix(text, "#") {
 			continue
 		}
-		r, d := parseLine(g, line, text)
-		diags = append(diags, d...)
-		if r != nil {
+		r, err := parseLine(g, i+1, text)
+		if err != nil {
+			diags = append(diags, Diagnostic{Line: i + 1, Col: 1, Severity: "error", Message: err.Error()})
+		} else {
 			out = append(out, r)
 		}
 	}
 	return out, diags
 }
 
-func parseLine(g Group, line int, text string) (*Rule, []Diagnostic) {
-	// TODO:
-	//   1. 按空白切分（注意正则 pattern 中可能包含空格 → 以 / 开头时找配对的结尾 /）
-	//   2. 第一个 token 为 pattern → 判断 PatternKind，构造 Matcher
-	//   3. 形如 kind://value 的 token → newAction(kind, value)；未知 kind 报错并给出拼写建议
-	//      特例：以 http:// 或 https:// 开头的 token 视为 mapRemote
-	//   4. 形如 key=value 的 token → newFilter
-	_ = text
-	return nil, []Diagnostic{{Line: line, Col: 1, Severity: "warning", Message: "parser not implemented"}}
+type condition struct{ key, value string }
+
+func (f condition) Match(c *flow.Context) bool {
+	switch f.key {
+	case "method":
+		return strings.EqualFold(c.Req.Method, f.value)
+	case "clientIp":
+		return c.ClientIP == f.value
+	case "status":
+		return c.Resp != nil && fmt.Sprint(c.Resp.StatusCode) == f.value
+	}
+	return false
+}
+func parseLine(g Group, line int, text string) (*Rule, error) {
+	var tokens []string
+	var tokenErr error
+	if strings.HasPrefix(text, "/") {
+		end := -1
+		for i := 1; i < len(text); i++ {
+			if text[i] == '/' && text[i-1] != '\\' && (i+1 == len(text) || text[i+1] == ' ' || text[i+1] == 'i') {
+				end = i
+				break
+			}
+		}
+		if end < 0 {
+			return nil, fmt.Errorf("unterminated regexp")
+		}
+		if end+1 < len(text) && text[end+1] == 'i' {
+			end++
+		}
+		rest, err := tokensOf(text[end+1:])
+		if err != nil {
+			return nil, err
+		}
+		tokens = append([]string{text[:end+1]}, rest...)
+	} else {
+		tokens, tokenErr = tokensOf(text)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+	}
+	if len(tokens) < 2 {
+		return nil, fmt.Errorf("expected pattern and action")
+	}
+	m, kind, err := Compile(tokens[0])
+	if err != nil {
+		return nil, err
+	}
+	r := &Rule{ID: fmt.Sprintf("%s:%d", g.ID, line), GroupID: g.ID, Group: g.Name, Line: line, Raw: text, Pattern: tokens[0], PatternKind: kind, Matcher: m}
+	for _, token := range tokens[1:] {
+		if strings.HasPrefix(token, "#") {
+			break
+		}
+		if k, v, ok := strings.Cut(token, "://"); ok {
+			if k == "http" || k == "https" {
+				v = token
+				k = "mapRemote"
+			}
+			a, err := newAction(k, v, nil)
+			if err != nil {
+				return nil, err
+			}
+			r.Actions = append(r.Actions, a)
+			r.Specs = append(r.Specs, ActionSpec{Kind: k, Value: v})
+		} else if k, v, ok := strings.Cut(token, "="); ok && (k == "method" || k == "clientIp" || k == "status") {
+			r.Filters = append(r.Filters, condition{k, v})
+			r.FilterText = append(r.FilterText, token)
+		} else {
+			return nil, fmt.Errorf("invalid action or filter: %s", token)
+		}
+	}
+	if len(r.Actions) == 0 {
+		return nil, fmt.Errorf("at least one action is required")
+	}
+	return r, nil
+}
+
+// Quotes group whitespace; backslashes remain literal for Windows file paths.
+func tokensOf(text string) ([]string, error) {
+	out := []string{}
+	var b strings.Builder
+	var quote rune
+	for _, c := range text {
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			} else {
+				b.WriteRune(c)
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if unicode.IsSpace(c) {
+			if b.Len() > 0 {
+				out = append(out, b.String())
+				b.Reset()
+			}
+		} else {
+			b.WriteRune(c)
+		}
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated quoted value")
+	}
+	if b.Len() > 0 {
+		out = append(out, b.String())
+	}
+	return out, nil
 }

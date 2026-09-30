@@ -32,7 +32,17 @@ func LANAddresses() []LanAddress {
 			out = append(out, LanAddress{Iface: ifc.Name, IP: ipn.IP.String()})
 		}
 	}
-	// TODO: 更好的主地址判断（默认路由所在网卡）
+	// UDP connect asks the OS to select a route without sending a packet.
+	if conn, err := net.Dial("udp4", "192.0.2.1:9"); err == nil {
+		ip := conn.LocalAddr().(*net.UDPAddr).IP.String()
+		conn.Close()
+		for i := range out {
+			if out[i].IP == ip && !isVirtual(out[i].Iface, out[i].IP) {
+				out[i].Primary = true
+				return out
+			}
+		}
+	}
 	for i := range out {
 		if !isVirtual(out[i].Iface, out[i].IP) {
 			out[i].Primary = true

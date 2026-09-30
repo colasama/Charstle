@@ -2,8 +2,12 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -92,14 +96,56 @@ func Default(dataDir string) *Config {
 // Load 读取 dataDir/config.json，不存在时返回默认配置。
 func Load(dataDir string) (*Config, error) {
 	cfg := Default(dataDir)
-	// TODO: 读取并合并 config.json；不存在则写入默认值
+	data, err := os.ReadFile(filepath.Join(dataDir, "config.json"))
+	if os.IsNotExist(err) {
+		return cfg, cfg.Save()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(data, cfg); err != nil {
+		return nil, err
+	}
+	if err = cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
 // Save 写回 dataDir/config.json。
 func (c *Config) Save() error {
-	// TODO
-	return fmt.Errorf("config.Save: not implemented")
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	return WriteJSON(filepath.Join(c.DataDir, "config.json"), c)
+}
+
+func (c *Config) Validate() error {
+	if c.Upstream.Proxy != "" {
+		u, err := url.Parse(c.Upstream.Proxy)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5" && u.Scheme != "socks5h") {
+			return fmt.Errorf("invalid upstream proxy URL")
+		}
+	}
+	if !c.Upstream.UseHostsFile && len(c.Upstream.DNSServers) == 0 {
+		return fmt.Errorf("disabling hosts requires explicit DNS servers")
+	}
+	if c.Capture.BreakpointTimeoutS < 1 || c.Capture.BreakpointTimeoutS > 86400 {
+		return fmt.Errorf("breakpoint timeout must be 1..86400 seconds")
+	}
+	if c.ProxyPort < 1 || c.ProxyPort > 65535 || c.AdminPort < 1 || c.AdminPort > 65535 || c.ProxyPort == c.AdminPort {
+		return fmt.Errorf("proxy/admin ports must be distinct and between 1 and 65535")
+	}
+	if net.ParseIP(c.ListenAddr) == nil {
+		return fmt.Errorf("listenAddr must be an IP address")
+	}
+	if c.AdminLanAccess && c.AdminPassword == "" {
+		return fmt.Errorf("LAN administration requires a password")
+	}
+	if c.Capture.MaxSessions < 1 || c.Capture.MaxMemoryMB < 1 || c.Capture.BodyCaptureLimitKB < 0 {
+		return fmt.Errorf("invalid capture limits")
+	}
+	return nil
 }
 
 func (c *Config) ProxyAddr() string {

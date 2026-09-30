@@ -1,65 +1,99 @@
 package rules
 
 import (
-	"sync/atomic"
-
 	"charstle/internal/flow"
+	"charstle/internal/store"
+	"sync/atomic"
 )
 
-// compiled 是一次编译后的只读规则快照；规则变更时整体替换，匹配过程无锁。
-type compiled struct {
-	ordered []*Rule      // 全部规则，按组顺序 + 行号
-	domains *domainIndex // 纯域名规则索引
-	scan    []*Rule      // 通配 / 正则规则
-}
-
+type compiled struct{ ordered []*Rule }
 type Engine struct {
 	values *ValueStore
 	snap   atomic.Pointer[compiled]
 	groups atomic.Pointer[[]Group]
 }
 
-func NewEngine(values *ValueStore) *Engine {
-	e := &Engine{values: values}
-	e.snap.Store(&compiled{domains: &domainIndex{}})
-	empty := []Group{}
-	e.groups.Store(&empty)
+func NewEngine(v *ValueStore) *Engine {
+	e := &Engine{values: v}
+	e.snap.Store(&compiled{})
+	gs := []Group{}
+	e.groups.Store(&gs)
 	return e
 }
-
-// Load 解析所有启用的规则组并原子替换快照，返回每个组的诊断信息。
 func (e *Engine) Load(groups []Group) map[string][]Diagnostic {
-	diags := make(map[string][]Diagnostic)
-	c := &compiled{domains: &domainIndex{}}
-	for _, g := range groups {
+	diags := map[string][]Diagnostic{}
+	c := &compiled{}
+	copyGroups := append([]Group{}, groups...)
+	for i, g := range copyGroups {
 		rs, d := Parse(g)
 		diags[g.ID] = d
+		copyGroups[i].RuleCount = len(rs)
+		copyGroups[i].ErrorCount = len(d)
 		if !g.Enabled {
 			continue
 		}
+		for _, r := range rs {
+			r.Actions = nil
+			for _, a := range r.Specs {
+				action, _ := newAction(a.Kind, a.Value, e.values)
+				r.Actions = append(r.Actions, action)
+			}
+		}
 		c.ordered = append(c.ordered, rs...)
-		// TODO: 纯域名规则放入 c.domains，其余放入 c.scan
 	}
 	e.snap.Store(c)
-	e.groups.Store(&groups)
+	e.groups.Store(&copyGroups)
 	return diags
 }
-
-func (e *Engine) Groups() []Group { return *e.groups.Load() }
-
-// Validate 只解析不生效，用于编辑器实时诊断。
+func (e *Engine) Groups() []Group { return append([]Group{}, (*e.groups.Load())...) }
 func (e *Engine) Validate(content string) []Diagnostic {
 	_, d := Parse(Group{Content: content})
 	return d
 }
-
-// Apply 在指定阶段执行所有命中规则的对应动作。
-// 同种 action 只执行第一条命中，不同种可叠加。
-func (e *Engine) Apply(ctx *flow.Context, phase flow.Phase) error {
-	// TODO:
-	//   c := e.snap.Load()
-	//   候选 = c.domains.lookup(host) ∪ c.scan，按原始顺序合并
-	//   for 每条规则: Matcher.Match(ctx.Target) → Filters 全部通过
-	//     → 对 phase 匹配的 action：若该 kind 尚未执行，则 ctx.Match = groups; action.Apply(ctx); ctx.Hit(...)
+func (e *Engine) Apply(c *flow.Context, phase flow.Phase) error {
+	done := map[string]bool{}
+	u := c.Req.URL
+	for _, r := range e.snap.Load().ordered {
+		groups, ok := r.Matcher.Match(u)
+		if !ok {
+			continue
+		}
+		for _, f := range r.Filters {
+			if !f.Match(c) {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		for i, a := range r.Actions {
+			preflight := phase == flow.PhaseRequest && a.Kind() == "cors" && c.Req.Method == "OPTIONS"
+			if (a.Phase() != phase && !preflight) || done[a.Kind()] {
+				continue
+			}
+			c.Match = groups
+			c.Pattern = r.Pattern
+			c.PatternKind = string(r.PatternKind)
+			if err := a.Apply(c); err != nil {
+				return err
+			}
+			if preflight {
+				c.ShortCircuit = true
+			}
+			done[a.Kind()] = true
+			r.HitCount.Add(1)
+			c.Hit(store.RuleHit{RuleID: r.ID, Group: r.Group, Line: r.Line, Pattern: r.Pattern, Action: a.Kind(), Value: r.Specs[i].Value, Phase: phase.String()})
+		}
+	}
 	return nil
+}
+
+func (e *Engine) Count(id string) int64 {
+	for _, r := range e.snap.Load().ordered {
+		if r.ID == id {
+			return r.HitCount.Load()
+		}
+	}
+	return 0
 }

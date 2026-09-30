@@ -1,4 +1,4 @@
-export type ThemeMode = 'system' | 'light' | 'dark';
+export type ThemeMode = "system" | "light" | "dark";
 
 export interface Settings {
   // 基础
@@ -13,6 +13,7 @@ export interface Settings {
   bodyCaptureLimitKB: number;
   spillDir: string;
   recordTunnels: boolean;
+  breakpointTimeoutS: number;
   // 协议
   http2: boolean;
   captureWebSocket: boolean;

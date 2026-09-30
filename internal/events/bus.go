@@ -29,9 +29,11 @@ type Event struct {
 const FlushInterval = 100 * time.Millisecond
 
 type Bus struct {
-	mu   sync.RWMutex
-	subs map[int]chan []Event
-	next int
+	mu      sync.RWMutex
+	subs    map[int]chan []Event
+	next    int
+	pending []Event
+	timer   *time.Timer
 }
 
 func NewBus() *Bus {
@@ -40,9 +42,37 @@ func NewBus() *Bus {
 
 // Publish 投递一个事件。不能阻塞调用方（代理热路径）。
 func (b *Bus) Publish(e Event) {
-	// TODO: 写入待发送缓冲；由后台 goroutine 每 FlushInterval 合并后分发。
-	//       同一 session 的多次 update 应合并为一次。
-	_ = e
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.subs) == 0 {
+		return
+	}
+	if len(b.pending) >= 10000 {
+		b.pending = []Event{{Type: "resync"}}
+	}
+	b.pending = append(b.pending, e)
+	if b.timer == nil {
+		b.timer = time.AfterFunc(FlushInterval, b.flush)
+	}
+}
+
+func (b *Bus) flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	batch := b.pending
+	b.pending = nil
+	b.timer = nil
+	for _, ch := range b.subs {
+		select {
+		case ch <- batch:
+		default:
+			select {
+			case <-ch:
+			default:
+			}
+			ch <- []Event{{Type: "resync"}}
+		}
+	}
 }
 
 // Subscribe 返回事件批次通道和取消函数。

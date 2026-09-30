@@ -11,6 +11,7 @@ package rules
 
 import (
 	"charstle/internal/flow"
+	"sync/atomic"
 )
 
 type PatternKind string
@@ -46,13 +47,24 @@ type Rule struct {
 	Matcher     Matcher
 	Actions     []Action
 	Filters     []Filter
+	Specs       []ActionSpec
+	FilterText  []string
+	HitCount    atomic.Int64
+}
+
+type ActionSpec struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
 }
 
 type Group struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Enabled bool   `json:"enabled"`
-	Content string `json:"content"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Enabled    bool   `json:"enabled"`
+	Content    string `json:"content"`
+	UpdatedAt  int64  `json:"updatedAt"`
+	RuleCount  int    `json:"ruleCount"`
+	ErrorCount int    `json:"errorCount"`
 }
 
 type Diagnostic struct {

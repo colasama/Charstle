@@ -1,0 +1,7 @@
+{
+  "name": "Charstle",
+  "outputfilename": "charstle-desktop",
+  "frontend:dir": "../web",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build"
+}

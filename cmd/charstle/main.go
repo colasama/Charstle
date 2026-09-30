@@ -1,110 +1,82 @@
-// Command charstle 启动代理服务与管理界面。
-//
-//	charstle -data-dir ~/.charstle
 package main
 
 import (
+	"charstle/internal/app"
+	"charstle/internal/config"
 	"context"
 	"flag"
-	"log/slog"
+	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
-
-	"charstle/internal/api"
-	"charstle/internal/config"
-	"charstle/internal/events"
-	"charstle/internal/mitm"
-	"charstle/internal/pipeline"
-	"charstle/internal/proxy"
-	"charstle/internal/rules"
-	"charstle/internal/store"
 )
 
+var version = "0.1.0-dev"
+
 func main() {
-	home, _ := os.UserHomeDir()
-	dataDir := flag.String("data-dir", filepath.Join(home, ".charstle"), "数据目录（证书、规则、设置）")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	data := flag.String("data-dir", filepath.Join(home, ".charstle"), "Data directory")
+	proxyPort := flag.Int("proxy-port", 0, "Override proxy port (default 8888)")
+	adminPort := flag.Int("admin-port", 0, "Override administration port (default 8899)")
+	noOpen := flag.Bool("no-open", false, "Do not open a browser")
+	showVersion := flag.Bool("version", false, "Print version")
 	flag.Parse()
-
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
-	cfg, err := config.Load(*dataDir)
-	if err != nil {
-		log.Error("load config", "err", err)
-		os.Exit(1)
+	if *showVersion {
+		fmt.Println("Charstle " + version)
+		return
 	}
-
-	// ---- 组装各模块 ----
-	bus := events.NewBus()
-	sessions := store.New(cfg.Capture, bus)
-
-	ca, err := mitm.LoadOrCreateCA(filepath.Join(*dataDir, "ca"))
+	cfg, err := config.Load(*data)
 	if err != nil {
-		log.Error("load CA", "err", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
-	certs := mitm.NewLeafCache(ca, 2000)
-	pins := mitm.NewPinTracker()
-
-	values := rules.NewValueStore(filepath.Join(*dataDir, "values"))
-	engine := rules.NewEngine(values)
-	// TODO: 从 dataDir/rules 加载规则组并 engine.Load(groups)
-
-	pipe := pipeline.New(pipeline.Options{
-		Rules:       engine,
-		Store:       sessions,
-		Bus:         bus,
-		Upstream:    cfg.Upstream,
-		Breakpoints: pipeline.NewBreakpoints(bus),
-		Throttle:    pipeline.NewThrottler(),
-	})
-
-	proxySrv := proxy.NewServer(proxy.Options{
-		Config:  cfg,
-		Handler: pipe,
-		Access:  proxy.NewAccessControl(cfg.Access, bus),
-		Certs:   certs,
-		Pins:    pins,
-		Store:   sessions,
-		Log:     log,
-		// 代理端口上的内置页面（charstle.pro / <ip>:<port>/ssl）
-		Builtin: api.CertPageHandler(ca, cfg),
-	})
-
-	adminSrv := api.NewServer(api.Deps{
-		Config:   cfg,
-		Store:    sessions,
-		Bus:      bus,
-		Rules:    engine,
-		Values:   values,
-		CA:       ca,
-		Pins:     pins,
-		Pipeline: pipe,
-		Log:      log,
-	})
-
-	// ---- 运行 ----
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	errc := make(chan error, 2)
-	go func() { errc <- proxySrv.ListenAndServe(ctx) }()
-	go func() { errc <- adminSrv.ListenAndServe(ctx) }()
-
-	log.Info("charstle started",
-		"proxy", cfg.ProxyAddr(),
-		"admin", cfg.AdminAddr(),
-		"lan", proxy.LANAddresses(),
-	)
-
-	select {
-	case <-ctx.Done():
-		log.Info("shutting down")
-	case err := <-errc:
-		if err != nil {
-			log.Error("server exited", "err", err)
+	if *proxyPort != 0 {
+		cfg.ProxyPort = *proxyPort
+	}
+	if *adminPort != 0 {
+		cfg.AdminPort = *adminPort
+	}
+	core, err := app.New(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	err = core.Run(ctx, func() {
+		url := fmt.Sprintf("http://127.0.0.1:%d", cfg.AdminPort)
+		fmt.Printf("Charstle %s\nAdmin: %s\nProxy: %s\nData: %s\n", version, url, cfg.ProxyAddr(), cfg.DataDir)
+		if !*noOpen {
+			openBrowser(url)
 		}
+	})
+	closeErr := core.Close()
+	if err != nil {
+		log.Print(err)
 	}
-	// TODO: 若开启了系统代理，退出前恢复（sysproxy.Disable）
+	if closeErr != nil {
+		log.Printf("restore system proxy: %v", closeErr)
+	}
+	if err != nil || closeErr != nil {
+		os.Exit(1)
+	}
+}
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err == nil {
+		go cmd.Wait()
+	}
 }

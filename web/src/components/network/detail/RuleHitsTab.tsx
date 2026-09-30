@@ -1,9 +1,13 @@
-import { ArrowUpRight, Waypoints } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import type { SessionDetail } from '../../../types';
-import { EmptyState } from '../../common/Controls';
+import { ArrowUpRight, Waypoints } from "lucide-react";
+import { Link } from "react-router-dom";
+import type { SessionDetail } from "../../../types";
+import { EmptyState } from "../../common/Controls";
 
-const phaseLabel = { request: '请求阶段', dial: '连接阶段', response: '响应阶段' };
+const phaseLabel = {
+  request: "请求阶段",
+  dial: "连接阶段",
+  response: "响应阶段",
+};
 
 export function RuleHitsTab({ s }: { s: SessionDetail }) {
   if (!s.ruleHits.length) {
@@ -23,8 +27,11 @@ export function RuleHitsTab({ s }: { s: SessionDetail }) {
             <span className="badge badge-purple">{h.action}</span>
             <span className="badge badge-outline">{phaseLabel[h.phase]}</span>
             <div className="spacer" />
-            {/* TODO: 跳转后定位到对应行 */}
-            <Link to={`/rules?group=${encodeURIComponent(h.group)}&line=${h.line}`} className="text-xs row" style={{ gap: 2 }}>
+            <Link
+              to={`/rules?group=${encodeURIComponent(h.group)}&line=${h.line}`}
+              className="text-xs row"
+              style={{ gap: 2 }}
+            >
               {h.group} : 第 {h.line} 行 <ArrowUpRight size={12} />
             </Link>
           </div>
